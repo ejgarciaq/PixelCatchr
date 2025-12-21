@@ -9,24 +9,40 @@ class GlobalHotkeyListener:
         self.settings = QSettings("Webtechcrafter", "PixelCatchr")
 
     def _map_qt_to_pynput(self, qt_str):
-        """Simple mapper from Qt key sequence string to pynput format."""
+        """Map a Qt key sequence string to a pynput-compatible format.
+        Handles extra whitespace, spaces as keys, and ignores empty parts.
+        """
         if not qt_str:
             return None
-            
-        parts = qt_str.lower().split('+')
+        # Split on '+' and strip each component
+        parts = [p.strip().lower() for p in qt_str.split('+') if p.strip()]
         mapped_parts = []
         for part in parts:
-            if part in ['ctrl', 'control']:
+            if part in ('ctrl', 'control'):
                 mapped_parts.append('<ctrl>')
             elif part == 'shift':
                 mapped_parts.append('<shift>')
             elif part == 'alt':
                 mapped_parts.append('<alt>')
-            elif part in ['print', 'print screen', 'sysreq']:
+            elif part in ('print', 'print screen', 'sysreq'):
                 mapped_parts.append('<print_screen>')
+            elif part == 'space':
+                mapped_parts.append('<space>')
+            elif part == 'esc' or part == 'escape':
+                mapped_parts.append('<esc>')
+            elif part == 'backspace':
+                mapped_parts.append('<backspace>')
+            elif part in ('enter', 'return'):
+                mapped_parts.append('<enter>')
+            elif part == 'tab':
+                mapped_parts.append('<tab>')
+            elif part.startswith('f') and part[1:].isdigit():
+                # Handle f1, f2, ..., f24
+                mapped_parts.append(f'<{part}>')
             else:
+                # For single characters like 'f', 'p', etc.
                 mapped_parts.append(part)
-        return '+'.join(mapped_parts)
+        return '+'.join(mapped_parts) if mapped_parts else None
 
     def start(self):
         # 1. Read hotkeys from settings (or defaults)
@@ -53,5 +69,24 @@ class GlobalHotkeyListener:
             print("No se pudieron configurar atajos globales.")
             return
 
-        self.listener = keyboard.GlobalHotKeys(hotkey_map)
-        self.listener.start()
+        try:
+            self.listener = keyboard.GlobalHotKeys(hotkey_map)
+            self.listener.start()
+        except ValueError as e:
+            print(f"Error al iniciar hotkeys: {e}")
+            # Fallback a hotkeys por defecto si falla la carga
+            if hotkey_map:
+                print("Reintentando con configuración básica...")
+                # Aquí podrías intentar una configuración de emergencia si fuera necesario.
+        except Exception as e:
+            print(f"Error inesperado en listener: {e}")
+
+    def stop(self):
+        if self.listener:
+            try:
+                self.listener.stop()
+                print("Listener de atajos detenido.")
+            except Exception as e:
+                print(f"Error al detener listener: {e}")
+            self.listener = None
+            

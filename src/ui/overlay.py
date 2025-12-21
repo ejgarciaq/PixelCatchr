@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QInputDialog,
 )
-from PyQt6.QtGui import QFontMetrics
+from PyQt6.QtGui import QFontMetrics, QKeySequence
 from PyQt6.QtCore import (
     Qt,
     QRect,
@@ -74,13 +74,22 @@ class SnippingOverlay(QWidget):
         # --- Cursor tracking ---
         self.cursor_pos = QPoint(0, 0)
 
+        # --- Resizing/Moving State ---
+        self.resize_handle_size = 16
+        self.active_handle = None  # "TL", "T", "TR", "R", "BR", "B", "BL", "L" or None
+        self.moving_selection = False
+        self.drag_start_pos = QPoint()
+        self.initial_selection_rect = QRect()
+
 
         # --- Toolbar ---
         self.toolbar = OverlayToolbar(self)
         self.toolbar.hide()
+        self.toolbar_moved_manually = False
         self.toolbar.tool_selected.connect(self.set_tool)
         self.toolbar.color_changed.connect(self.set_color)
         self.toolbar.action_triggered.connect(self.handle_action)
+        self.toolbar.manually_moved.connect(self._on_toolbar_manually_moved)
 
         self.show_fullscreen()
 
@@ -136,11 +145,15 @@ class SnippingOverlay(QWidget):
         return full_pixmap
 
     def show_fullscreen(self):
-        desktop = QApplication.primaryScreen().availableGeometry()
-        for screen in QApplication.screens():
-            desktop = desktop.united(screen.availableGeometry())
-        self.setGeometry(desktop)
-        self.showFullScreen()
+        # Use full geometry of all screens to cover everything (including taskbars)
+        screens = QApplication.screens()
+        virtual_geometry = QRect()
+        for screen in screens:
+            virtual_geometry = virtual_geometry.united(screen.geometry())
+            
+        self.setGeometry(virtual_geometry)
+        # Avoid showFullScreen() which might restrict the window to a single screen
+        self.show()
         self.activateWindow()
         self.raise_()
 
@@ -151,6 +164,54 @@ class SnippingOverlay(QWidget):
         self.is_selecting = False
         self.update()
         self._show_toolbar()
+
+    def _hit_test_handle(self, pos: QPoint):
+        if not self.selection_done:
+            return None
+        
+        r = self.selection_rect
+        hs = self.resize_handle_size
+        hw = hs // 2  # half width
+        
+        # Handle centers
+        handles = {
+            "TL": r.topLeft(),
+            "T": QPoint(r.center().x(), r.top()),
+            "TR": r.topRight(),
+            "R": QPoint(r.right(), r.center().y()),
+            "BR": r.bottomRight(),
+            "B": QPoint(r.center().x(), r.bottom()),
+            "BL": r.bottomLeft(),
+            "L": QPoint(r.left(), r.center().y()),
+        }
+        
+        for name, p in handles.items():
+            rect = QRect(p.x() - hw, p.y() - hw, hs, hs)
+            if rect.contains(pos):
+                return name
+                
+        if r.contains(pos):
+            return "INSIDE"
+            
+        return None
+
+    def _update_cursor_shape(self, handle_name):
+        if not handle_name:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+
+        mapping = {
+            "TL": Qt.CursorShape.SizeFDiagCursor,
+            "T": Qt.CursorShape.SizeVerCursor,
+            "TR": Qt.CursorShape.SizeBDiagCursor,
+            "R": Qt.CursorShape.SizeHorCursor,
+            "BR": Qt.CursorShape.SizeFDiagCursor,
+            "B": Qt.CursorShape.SizeVerCursor,
+            "BL": Qt.CursorShape.SizeBDiagCursor,
+            "L": Qt.CursorShape.SizeHorCursor,
+            "INSIDE": Qt.CursorShape.SizeAllCursor,
+        }
+        self.setCursor(mapping.get(handle_name, Qt.CursorShape.ArrowCursor))
 
     # ---------------------------------------------------------------------
     # Toolbar callbacks
@@ -172,6 +233,10 @@ class SnippingOverlay(QWidget):
             self.save_capture()
         elif action_id == "copy":
             self.copy_to_clipboard()
+        elif action_id == "undo":
+            if self.annotations:
+                self.annotations.pop()
+                self.update()
 
     # ---------------------------------------------------------------------
     # Paint
@@ -197,7 +262,8 @@ class SnippingOverlay(QWidget):
             hole.addRect(QRectF(current_rect))
             path = path.subtracted(hole)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 100))
+        opacity = self.settings.value("overlay_opacity", 100, type=int)
+        painter.setBrush(QColor(0, 0, 0, opacity))
         painter.drawPath(path)
 
         # 3️⃣ Draw selection border
@@ -205,6 +271,23 @@ class SnippingOverlay(QWidget):
             painter.setPen(QPen(QColor("white"), 1, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(current_rect)
+            
+            # Draw resize handles if selection is done and no tool is active
+            if self.selection_done and self.current_tool == "none":
+                hs = self.resize_handle_size
+                hw = hs // 2
+                painter.setPen(QPen(Qt.GlobalColor.white))
+                painter.setBrush(Qt.GlobalColor.white)
+                
+                r = current_rect
+                points = [
+                    r.topLeft(), QPoint(r.center().x(), r.top()), r.topRight(),
+                    QPoint(r.right(), r.center().y()), r.bottomRight(), QPoint(r.center().x(), r.bottom()),
+                    r.bottomLeft(), QPoint(r.left(), r.center().y())
+                ]
+                
+                for p in points:
+                    painter.drawRect(p.x() - hw, p.y() - hw, hs, hs)
 
         # 4️⃣ Persistent annotations
         for item in self.annotations:
@@ -256,15 +339,28 @@ class SnippingOverlay(QWidget):
                 painter.drawText(dim_pos, dim_text)
 
     def _draw_annotation(self, painter: QPainter, item: dict):
-        if item["type"] not in ["blur", "image"]:
+        if item["type"] == "pen":
             pen = QPen(item["color"], 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-        if item["type"] == "pen":
+            painter.drawPath(item["data"])
+        elif item["type"] == "highlighter":
+            # Highlighter: thick, semi-transparent
+            c = QColor(item["color"])
+            c.setAlpha(80)
+            pen = QPen(c, 24, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(item["data"])
         elif item["type"] == "rect":
+            pen = QPen(item["color"], 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(item["data"])
         elif item["type"] == "arrow":
+            pen = QPen(item["color"], 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             self._draw_arrow(painter, item["data"])
         elif item["type"] == "text":
             painter.setPen(QPen(item["color"], 3))
@@ -301,6 +397,7 @@ class SnippingOverlay(QWidget):
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
+            
         if not self.selection_done:
             # Start region selection
             self.begin = event.pos()
@@ -308,51 +405,130 @@ class SnippingOverlay(QWidget):
             self.is_selecting = True
             self.update()
             return
-        # Region already selected – handle tools
-        if self.current_tool == "none":
-            return
-        if self.current_tool == "text":
-            idx = self._hit_test_text(event.pos())
-            if idx is not None:
-                self._edit_text_annotation(idx)
+            
+        # Region already selected
+        # If a tool is active, use it
+        if self.current_tool != "none":
+            if self.current_tool == "text":
+                idx = self._hit_test_text(event.pos())
+                if idx is not None:
+                    self._edit_text_annotation(idx)
+                else:
+                    text, ok = QInputDialog.getText(self, "Agregar Texto", "Ingrese el texto:")
+                    if ok and text:
+                        annotation = {
+                            "type": "text",
+                            "data": text,
+                            "pos": event.pos(),
+                            "color": self.current_color,
+                        }
+                        self.annotations.append(annotation)
+                        self.update()
             else:
-                text, ok = QInputDialog.getText(self, "Agregar Texto", "Ingrese el texto:")
-                if ok and text:
-                    annotation = {
-                        "type": "text",
-                        "data": text,
-                        "pos": event.pos(),
-                        "color": self.current_color,
-                    }
-                    self.annotations.append(annotation)
-                    self.update()
+                self._start_drawing(event.pos())
+            return
+            
+        # If NO tool is active, check for resize/move handles
+        handle = self._hit_test_handle(event.pos())
+        if handle:
+            self.toolbar.hide() # Hide toolbar while adjusting
+            if handle == "INSIDE":
+                self.moving_selection = True
+                self.drag_start_pos = event.pos()
+                self.initial_selection_rect = self.selection_rect
+            else:
+                self.active_handle = handle
+                self.drag_start_pos = event.pos()
+                self.initial_selection_rect = self.selection_rect
         else:
-            self._start_drawing(event.pos())
+            # Clicked outside selection rect -> maybe clear selection?
+            # For now, let's just create a new selection like Lightshot does (reset)
+            self.selection_done = False
+            self.begin = event.pos()
+            self.end = self.begin
+            self.is_selecting = True
+            self.annotations = [] # Clear annotations if re-selecting
+            self.toolbar.hide()
+            self.toolbar_moved_manually = False # Reset for new selection
+            self.update()
 
     def mouseMoveEvent(self, event):
         self.cursor_pos = event.pos()
+        
         if self.is_selecting:
             self.end = event.pos()
             self.selection_rect = QRect(self.begin, self.end).normalized()
             self.update()
+            
+        elif self.active_handle:
+            # Resizing logic
+            r = self.initial_selection_rect
+            delta = event.pos() - self.drag_start_pos
+            dx, dy = delta.x(), delta.y()
+            
+            new_rect = QRect(r)
+            
+            if "L" in self.active_handle:
+                new_rect.setLeft(r.left() + dx)
+            if "R" in self.active_handle:
+                new_rect.setRight(r.right() + dx)
+            if "T" in self.active_handle:
+                new_rect.setTop(r.top() + dy)
+            if "B" in self.active_handle:
+                new_rect.setBottom(r.bottom() + dy)
+                
+            self.selection_rect = new_rect.normalized()
+            self.update()
+            
+        elif self.moving_selection:
+            # Moving logic
+            delta = event.pos() - self.drag_start_pos
+            self.selection_rect = self.initial_selection_rect.translated(delta)
+            
+            # Constrain to screen
+            screen_geo = self.screen().geometry() # or self.rect()
+            
+            # Simple containment check / clamping could be added here
+            # For now allow free movement, user can bring it back
+            self.update()
+            
         elif self.selection_done and self.current_drawing_item:
             self._update_drawing(event.pos())
+            
+        elif self.selection_done and self.current_tool == "none":
+            # Update cursor shape based on hover
+            handle = self._hit_test_handle(event.pos())
+            self._update_cursor_shape(handle)
+        
         else:
-            # Update just to show cursor pos changes even if not doing anything
+            # Default state
+            if self.current_tool != "none":
+                self.setCursor(Qt.CursorShape.CrossCursor)
+            else:
+                 self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
+            
         if self.is_selecting:
             self.is_selecting = False
             self.selection_rect = QRect(self.begin, self.end).normalized()
             if self.selection_rect.width() > 10 and self.selection_rect.height() > 10:
                 self.selection_done = True
                 self._show_toolbar()
+                self.setMouseTracking(True) # Ensure tracking is on for hover effects
             else:
                 self.selection_done = False
                 self.update()
+            return
+
+        if self.active_handle or self.moving_selection:
+            self.active_handle = None
+            self.moving_selection = False
+            self._show_toolbar()
+            self.update()
             return
         if self.current_drawing_item:
             # If it's a blur tool, we process the image immediately and store it as a static image
@@ -395,6 +571,9 @@ class SnippingOverlay(QWidget):
         if self.current_tool == "pen":
             path = QPainterPath(QPointF(pos))
             self.current_drawing_item = {"type": "pen", "data": path, "color": self.current_color}
+        elif self.current_tool == "highlighter":
+            path = QPainterPath(QPointF(pos))
+            self.current_drawing_item = {"type": "highlighter", "data": path, "color": self.current_color}
         elif self.current_tool == "rect":
             self.current_drawing_item = {
                 "type": "rect",
@@ -418,7 +597,7 @@ class SnippingOverlay(QWidget):
             }
 
     def _update_drawing(self, pos: QPoint):
-        if self.current_tool == "pen":
+        if self.current_tool in ["pen", "highlighter"]:
             self.current_drawing_item["data"].lineTo(QPointF(pos))
         elif self.current_tool in ["rect", "blur"]:
             origin = self.current_drawing_item["origin"]
@@ -463,15 +642,48 @@ class SnippingOverlay(QWidget):
     # ---------------------------------------------------------------------
     # Toolbar positioning
     # ---------------------------------------------------------------------
+    def _on_toolbar_manually_moved(self):
+        self.toolbar_moved_manually = True
+
     def _show_toolbar(self):
-        tb_x = self.selection_rect.right() - self.toolbar.width()
-        tb_y = self.selection_rect.bottom() + 5
-        screen_geo = self.screen().geometry()
-        if tb_y + self.toolbar.height() > screen_geo.bottom():
-            tb_y = self.selection_rect.bottom() - self.toolbar.height() - 5
-        if tb_x < screen_geo.left():
-            tb_x = screen_geo.left()
-        self.toolbar.move(tb_x, tb_y)
+        if not self.selection_rect.isValid():
+            return
+            
+        # Adjust size first
+        self.toolbar.adjustSize()
+
+        if self.toolbar_moved_manually:
+            self.toolbar.show()
+            self.toolbar.raise_()
+            return
+
+        tb_w = self.toolbar.width()
+        tb_h = self.toolbar.height()
+
+        # Horizontal: Center relative to selection
+        tb_x = self.selection_rect.center().x() - (tb_w // 2)
+        
+        # Vertical: Below selection with margin
+        tb_y = self.selection_rect.bottom() + 10
+
+        # Screen boundary clamping logic
+        global_center = self.mapToGlobal(self.selection_rect.center())
+        screen = QApplication.screenAt(global_center) or self.screen()
+        screen_geo = screen.geometry()
+        screen_tl_local = self.mapFromGlobal(screen_geo.topLeft())
+        screen_br_local = self.mapFromGlobal(screen_geo.bottomRight())
+
+        # Clamp X horizontally within screen
+        if tb_x < screen_tl_local.x():
+            tb_x = screen_tl_local.x()
+        elif tb_x + tb_w > screen_br_local.x():
+            tb_x = screen_br_local.x() - tb_w
+
+        # Check if it fits below, otherwise flip to top
+        if tb_y + tb_h > screen_br_local.y():
+            tb_y = self.selection_rect.top() - tb_h - 10
+
+        self.toolbar.move(int(tb_x), int(tb_y))
         self.toolbar.show()
         self.toolbar.raise_()
 
@@ -537,6 +749,7 @@ class SnippingOverlay(QWidget):
         )
         if file_path:
             img.save(file_path)
+            self.capture_finished.emit(f"Captura guardada en: {file_path}")
             self.close()
             self.on_close_signal.emit()
         else:
@@ -546,6 +759,7 @@ class SnippingOverlay(QWidget):
     def copy_to_clipboard(self):
         img = self._get_capture_image()
         QApplication.clipboard().setImage(img)
+        self.capture_finished.emit("Captura copiada al portapapeles")
         self.close()
         self.on_close_signal.emit()
 
@@ -553,7 +767,26 @@ class SnippingOverlay(QWidget):
     # Keyboard shortcuts
     # ---------------------------------------------------------------------
     def keyPressEvent(self, event):
+        # Check specifically for the configured copy shortcut
+        # We construct a QKeySequence from the event to compare
+        key = event.key()
+        modifiers = event.modifiers()
+        
+        # Filter out irrelevant modifiers for clean matching? 
+        # Actually QKeySequence(modifiers | key) is standard way BUT
+        # we need to be careful about NumLock/CapsLock which might be in modifiers.
+        # For simplicity, let's try direct comparison
+        
+        pressed_seq = QKeySequence(modifiers.value | key)
+        copy_seq_str = self.settings.value("hk_copy", "Ctrl+C")
+        copy_seq = QKeySequence(copy_seq_str)
+        
+        if pressed_seq == copy_seq:
+            self.copy_to_clipboard()
+            return
+
         if event.key() == Qt.Key.Key_Escape:
+            # "Salga de la aplicación" -> entendido como salir del modo captura (cerrar overlay)
             self.close()
             self.on_close_signal.emit()
         elif event.key() == Qt.Key.Key_Z and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):

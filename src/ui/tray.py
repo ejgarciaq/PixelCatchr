@@ -1,16 +1,23 @@
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication, QMessageBox
 from PyQt6.QtGui import QIcon, QAction, QPixmap
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, pyqtSlot
 from src.ui.settings import SettingsWindow
+from src.utils import resource_path
 import qtawesome as qta
 
 class SystemTrayIcon(QSystemTrayIcon):
     capture_triggered = pyqtSignal()
     full_capture_triggered = pyqtSignal()
+    settings_changed = pyqtSignal()
 
     def __init__(self, app_instance: QApplication): 
         # Asegúrate de que 'assets/icon.png' exista.
-        super().__init__(QIcon("assets/icon.png"))
+        import os
+        icon_path = resource_path("assets/icon.png")
+        if not os.path.exists(icon_path):
+             QMessageBox.critical(None, "Error de Icono", f"No se encontró el archivo del icono en:\n{icon_path}")
+        
+        super().__init__(QIcon(icon_path))
         self.setToolTip("PixelCatchr")
         self.app_instance = app_instance
         
@@ -61,6 +68,7 @@ class SystemTrayIcon(QSystemTrayIcon):
     def show_settings(self):
         if self.settings_window is None:
             self.settings_window = SettingsWindow()
+            self.settings_window.settings_saved.connect(self.settings_changed.emit)
         self.settings_window.show()
         self.settings_window.activateWindow()
         self.settings_window.raise_()
@@ -72,8 +80,8 @@ class SystemTrayIcon(QSystemTrayIcon):
         msg.setWindowTitle("Acerca de PixelCatchr")
         msg.setText("<h3>PixelCatchr v1.0</h3>"
                     f"<p>&copy; 2025 - {year} Webtechcrafter. Todos los derechos reservados.</p>"
-                    "<p>Desarrollado con Python y PyQt6.</p>"
+                    "<p>Desarrollado por Edson J. García Quirós</p>"
                     '<p><a href="https://www.webtechcrafter.com">Visita nuestra página oficial</a></p>')
-        msg.setIconPixmap(QPixmap("assets/icon.png").scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))  # tu icono a la izquierda
+        msg.setIconPixmap(QPixmap(resource_path("assets/icon.png")).scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))  # tu icono a la izquierda
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
