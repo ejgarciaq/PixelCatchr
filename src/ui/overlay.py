@@ -97,10 +97,12 @@ class SnippingOverlay(QWidget):
     # Helper methods
     # ---------------------------------------------------------------------
     def _capture_full_screen(self):
-        # 1. Calculate total geometry of the virtual desktop
         screens = QApplication.screens()
-        virtual_geometry = QRect()
-        for screen in screens:
+        if not screens:
+            return QPixmap()
+            
+        virtual_geometry = screens[0].geometry()
+        for screen in screens[1:]:
             virtual_geometry = virtual_geometry.united(screen.geometry())
             
         # 2. Create master pixmap covering the whole virtual desktop
@@ -147,12 +149,23 @@ class SnippingOverlay(QWidget):
     def show_fullscreen(self):
         # Use full geometry of all screens to cover everything (including taskbars)
         screens = QApplication.screens()
-        virtual_geometry = QRect()
-        for screen in screens:
+        if not screens:
+            return
+            
+        virtual_geometry = screens[0].geometry()
+        for screen in screens[1:]:
             virtual_geometry = virtual_geometry.united(screen.geometry())
             
         self.setGeometry(virtual_geometry)
-        # Avoid showFullScreen() which might restrict the window to a single screen
+        
+        # Ensure it actually covers everything on Windows multi-monitor
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.X11BypassWindowManagerHint # Helpful on some systems
+        )
+        
         self.show()
         self.activateWindow()
         self.raise_()
@@ -296,12 +309,25 @@ class SnippingOverlay(QWidget):
         if self.current_drawing_item:
             self._draw_annotation(painter, self.current_drawing_item)
 
-        # 6️⃣ Draw cursor coordinates (Top-Left of Screen)
+        # 6️⃣ Draw cursor coordinates and Crosshair (when selecting)
+        if self.is_selecting or (not self.selection_done and self.current_tool == "none"):
+            # Draw Crosshair
+            crosshair_pen = QPen(QColor(255, 255, 255, 120), 1, Qt.PenStyle.SolidLine)
+            painter.setPen(crosshair_pen)
+            # Vertical line
+            painter.drawLine(self.cursor_pos.x(), 0, self.cursor_pos.x(), self.height())
+            # Horizontal line
+            painter.drawLine(0, self.cursor_pos.y(), self.width(), self.cursor_pos.y())
+
         if self.settings.value("show_coords", True, type=bool):
             painter.setPen(QPen(Qt.GlobalColor.white))
             painter.drawText(20, 30, f"X: {self.cursor_pos.x()} Y: {self.cursor_pos.y()}")
+            
+        # 7️⃣ Draw Magnifier (when selecting or choosing first point)
+        if self.is_selecting or (not self.selection_done and self.current_tool == "none"):
+            self._draw_magnifier(painter)
 
-        # 7️⃣ Draw Date/Time & Dimensions (if valid)
+        # 8️⃣ Draw Date/Time & Dimensions (if valid)
         if not current_rect.isNull() and current_rect.isValid():
             fm = QFontMetrics(self.font())
             ts_h = fm.height()
@@ -391,6 +417,64 @@ class SnippingOverlay(QWidget):
         painter.drawPolygon(polygon)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
+    def _draw_magnifier(self, painter: QPainter):
+        """Draws a zoomed-in view of the area under the cursor."""
+        if not hasattr(self, "screenshot") or self.screenshot.isNull():
+            return
+            
+        zoom_factor = 5
+        mag_size = 120
+        half_mag = mag_size // 2
+        
+        # Source rectangle (small area around cursor)
+        src_size = mag_size // zoom_factor
+        src_rect = QRect(
+            self.cursor_pos.x() - src_size // 2,
+            self.cursor_pos.y() - src_size // 2,
+            src_size,
+            src_size
+        )
+        
+        # Determine where to draw the magnifier (offset from cursor)
+        mag_pos = self.cursor_pos + QPoint(20, 20)
+        # Flip to other side if near edge
+        if mag_pos.x() + mag_size > self.width():
+            mag_pos.setX(self.cursor_pos.x() - mag_size - 20)
+        if mag_pos.y() + mag_size > self.height():
+            mag_pos.setY(self.cursor_pos.y() - mag_size - 20)
+            
+        # Draw background
+        mag_rect = QRect(mag_pos.x(), mag_pos.y(), mag_size, mag_size)
+        painter.save()
+        painter.setClipRect(mag_rect)
+        
+        # Draw zoomed image
+        painter.drawPixmap(mag_rect, self.screenshot, src_rect)
+        
+        # Draw grid
+        painter.setPen(QPen(QColor(255, 255, 255, 50), 1))
+        for i in range(1, zoom_factor):
+            step = i * (mag_size / zoom_factor)
+            painter.drawLine(int(mag_pos.x() + step), mag_pos.y(), int(mag_pos.x() + step), mag_pos.y() + mag_size)
+            painter.drawLine(mag_pos.x(), int(mag_pos.y() + step), mag_pos.x() + mag_size, int(mag_pos.y() + step))
+            
+        # Draw center pixel highlight
+        center_pixel_rect = QRect(
+            int(mag_pos.x() + (src_size // 2) * zoom_factor),
+            int(mag_pos.y() + (src_size // 2) * zoom_factor),
+            zoom_factor,
+            zoom_factor
+        )
+        painter.setPen(QPen(Qt.GlobalColor.red, 1))
+        painter.drawRect(center_pixel_rect)
+        
+        painter.restore()
+        
+        # Draw border
+        painter.setPen(QPen(Qt.GlobalColor.white, 2))
+        painter.drawRect(mag_rect)
+
+
     # ---------------------------------------------------------------------
     # Mouse handling
     # ---------------------------------------------------------------------
@@ -451,6 +535,26 @@ class SnippingOverlay(QWidget):
             self.toolbar.hide()
             self.toolbar_moved_manually = False # Reset for new selection
             self.update()
+
+    def mouseDoubleClickEvent(self, event):
+        """Double click selects the entire monitor under the cursor."""
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+            
+        screen = QApplication.screenAt(event.globalPosition().toPoint()) or self.screen()
+        screen_geo = screen.geometry()
+        
+        # Convert global screen geometry to local coordinates
+        local_geo = QRect(
+            self.mapFromGlobal(screen_geo.topLeft()),
+            self.mapFromGlobal(screen_geo.bottomRight())
+        )
+        
+        self.selection_rect = local_geo
+        self.selection_done = True
+        self.is_selecting = False
+        self.update()
+        self._show_toolbar()
 
     def mouseMoveEvent(self, event):
         self.cursor_pos = event.pos()
@@ -667,23 +771,35 @@ class SnippingOverlay(QWidget):
         tb_y = self.selection_rect.bottom() + 10
 
         # Screen boundary clamping logic
+        # For multi-monitor, we find which monitor the center of the selection is in
         global_center = self.mapToGlobal(self.selection_rect.center())
         screen = QApplication.screenAt(global_center) or self.screen()
         screen_geo = screen.geometry()
+        
+        # Convert screen geometry to our local coordinate system (the giant overlay)
         screen_tl_local = self.mapFromGlobal(screen_geo.topLeft())
         screen_br_local = self.mapFromGlobal(screen_geo.bottomRight())
 
-        # Clamp X horizontally within screen
+        # Clamp X horizontally within THAT screen
         if tb_x < screen_tl_local.x():
             tb_x = screen_tl_local.x()
-        elif tb_x + tb_w > screen_br_local.x():
+        if tb_x + tb_w > screen_br_local.x():
             tb_x = screen_br_local.x() - tb_w
 
         # Check if it fits below, otherwise flip to top
         if tb_y + tb_h > screen_br_local.y():
             tb_y = self.selection_rect.top() - tb_h - 10
+            
+        # Final vertical clamping to ensure it's visible on screen
+        if tb_y < screen_tl_local.y():
+            tb_y = screen_tl_local.y()
+        if tb_y + tb_h > screen_br_local.y():
+            tb_y = screen_br_local.y() - tb_h
 
-        self.toolbar.move(int(tb_x), int(tb_y))
+        # CRITICAL: Use mapToGlobal because the toolbar is a top-level Window (due to flags)
+        # thus move() expects global screen coordinates.
+        global_target = self.mapToGlobal(QPoint(int(tb_x), int(tb_y)))
+        self.toolbar.move(global_target)
         self.toolbar.show()
         self.toolbar.raise_()
 

@@ -40,6 +40,10 @@ class PixelCatchrApp(QObject):
 
     def __init__(self):
         super().__init__()
+        # Ensure High DPI support (Qt6 handles most, but we can set rounding policy)
+        from PyQt6.QtCore import Qt
+        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        
         self.app = QApplication.instance() or QApplication(sys.argv)
         
         # IMPORTANTE: Evita que la app se cierre al terminar una captura
