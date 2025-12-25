@@ -692,7 +692,7 @@ class SnippingOverlay(QWidget):
                 "data": QRect(pos, pos),
                 "color": None, # Blur doesn't use color
             }
-        elif self.current_tool == "arrow":
+        elif self.current_twool == "arrow":
             self.current_drawing_item = {
                 "type": "arrow",
                 "origin": pos,
