@@ -30,6 +30,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QPainter, QColor, QPen, QImage, QPainterPath, QPolygonF, QCursor, QPixmap
 
 from src.ui.toolbar import OverlayToolbar
+from src.core.i18n import i18n
 
 
 class SnippingOverlay(QWidget):
@@ -498,7 +499,7 @@ class SnippingOverlay(QWidget):
                 if idx is not None:
                     self._edit_text_annotation(idx)
                 else:
-                    text, ok = QInputDialog.getText(self, "Agregar Texto", "Ingrese el texto:")
+                    text, ok = QInputDialog.getText(self, i18n.tr("input_add_text_title"), i18n.tr("input_add_text_label"))
                     if ok and text:
                         annotation = {
                             "type": "text",
@@ -692,7 +693,7 @@ class SnippingOverlay(QWidget):
                 "data": QRect(pos, pos),
                 "color": None, # Blur doesn't use color
             }
-        elif self.current_twool == "arrow":
+        elif self.current_tool == "arrow":
             self.current_drawing_item = {
                 "type": "arrow",
                 "origin": pos,
@@ -736,7 +737,7 @@ class SnippingOverlay(QWidget):
         annotation = self.annotations[idx]
         current_text = annotation["data"]
         new_text, ok = QInputDialog.getText(
-            self, "Editar Texto", "Modifique el texto:", text=current_text
+            self, i18n.tr("input_edit_text_title"), i18n.tr("input_edit_text_label"), text=current_text
         )
         if ok and new_text:
             annotation["data"] = new_text

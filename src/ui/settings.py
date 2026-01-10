@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtGui import QIcon
 from src.utils import resource_path
+from src.core.i18n import i18n
 import sys
 import os
 import platform
@@ -15,12 +16,15 @@ class SettingsWindow(QWidget):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Configuración - PixelCatchr")
+        self.setWindowTitle(i18n.tr("settings_title"))
         self.setWindowIcon(QIcon(resource_path("assets/icon.png")))
-        self.resize(450, 350)
+        self.resize(450, 400)
         # self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         
         self.settings = QSettings("Webtechcrafter", "PixelCatchr")
+        
+        # Subscribe to language changes
+        i18n.language_changed.connect(self.retranslateUi)
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -45,18 +49,54 @@ class SettingsWindow(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         
-        self.btn_save = QPushButton("Guardar")
+        self.btn_save = QPushButton(i18n.tr("btn_save"))
         self.btn_save.clicked.connect(self.save_settings)
         btn_layout.addWidget(self.btn_save)
         
-        self.btn_cancel = QPushButton("Cancelar")
+        self.btn_cancel = QPushButton(i18n.tr("btn_cancel"))
         self.btn_cancel.clicked.connect(self.close)
         btn_layout.addWidget(self.btn_cancel)
         
+        # Update UI texts immediately
+        self.retranslateUi()
+        
         layout.addLayout(btn_layout)
+
+    def retranslateUi(self):
+        self.setWindowTitle(i18n.tr("settings_title"))
+        self.tabs.setTabText(0, i18n.tr("tab_general"))
+        self.tabs.setTabText(1, i18n.tr("tab_hotkeys"))
+        self.tabs.setTabText(2, i18n.tr("tab_format"))
+        
+        self.btn_save.setText(i18n.tr("btn_save"))
+        self.btn_cancel.setText(i18n.tr("btn_cancel"))
+        
+        # General Tab
+        self.cb_startup.setText(i18n.tr("chk_system_startup"))
+        self.cb_notify.setText(i18n.tr("chk_notification"))
+        self.cb_cursor.setText(i18n.tr("chk_cursor"))
+        self.cb_datetime.setText(i18n.tr("chk_datetime"))
+        self.cb_coords.setText(i18n.tr("chk_coords"))
+        self.lang_label.setText(i18n.tr("lang_label"))
+        
+        self.opacity_label.setText(i18n.tr("lbl_opacity"))
+        
+        # Hotkeys Tab (We need to update labels in FormLayout)
+        # This is tricky with FormLayout. Simple approach: iterate and update
+        self.hk_capture_label.setText(i18n.tr("lbl_zone_hotkey"))
+        self.hk_full_label.setText(i18n.tr("lbl_full_hotkey"))
+        self.hk_copy_label.setText(i18n.tr("lbl_copy_hotkey"))
+        self.hk_datetime_label.setText(i18n.tr("lbl_datetime_hotkey"))
+
+        # Format Tab
+        self.fmt_label.setText(i18n.tr("lbl_image_format"))
+        self.pattern_label.setText(i18n.tr("lbl_filename_pattern"))
 
     def save_settings(self):
         # Save general settings
+        # Language is already saved when changed in Combobox
+        # i18n.load_language(self.lang_combo.currentData())
+        
         self.settings.setValue("show_datetime", self.cb_datetime.isChecked())
         self.settings.setValue("show_coords", self.cb_coords.isChecked())
         self.settings.setValue("capture_cursor", self.cb_cursor.isChecked())
@@ -71,6 +111,7 @@ class SettingsWindow(QWidget):
         self.settings.setValue("hk_capture", self.hk_capture.keySequence().toString())
         self.settings.setValue("hk_full", self.hk_full.keySequence().toString())
         self.settings.setValue("hk_copy", self.hk_copy.keySequence().toString())
+        self.settings.setValue("hk_datetime", self.hk_datetime.keySequence().toString())
 
         # Save format settings
         self.settings.setValue("image_format", self.fmt_combo.currentText())
@@ -79,12 +120,31 @@ class SettingsWindow(QWidget):
         self.settings.sync()
         self.settings_saved.emit()
         
-        print("Configuración guardada")
+        print(i18n.tr("settings_saved"))
         self.close()
 
     def _init_general_tab(self):
         layout = QVBoxLayout()
         layout.setSpacing(10)
+        
+        # Language Selector
+        lang_layout = QHBoxLayout()
+        self.lang_label = QLabel(i18n.tr("lang_label"))
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem("Español", "es")
+        self.lang_combo.addItem("English", "en")
+        
+        # Set current language
+        current_lang = i18n.language_code
+        index = self.lang_combo.findData(current_lang)
+        if index >= 0:
+            self.lang_combo.setCurrentIndex(index)
+            
+        self.lang_combo.currentIndexChanged.connect(self._on_language_changed)
+        
+        lang_layout.addWidget(self.lang_label)
+        lang_layout.addWidget(self.lang_combo)
+        layout.addLayout(lang_layout)
         
         # Initialize checkboxes with current setting value (default True)
         show_datetime = self.settings.value("show_datetime", True, type=bool)
@@ -109,7 +169,7 @@ class SettingsWindow(QWidget):
 
         # Opacity slider
         opacity_layout = QVBoxLayout()
-        opacity_label = QLabel("Opacidad del fondo (oscurecimiento):")
+        self.opacity_label = QLabel("Opacidad del fondo (oscurecimiento):")
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(0, 255)
         self.opacity_slider.setValue(self.settings.value("overlay_opacity", 100, type=int))
@@ -117,7 +177,7 @@ class SettingsWindow(QWidget):
         opacity_val_label = QLabel(str(self.opacity_slider.value()))
         self.opacity_slider.valueChanged.connect(lambda v: opacity_val_label.setText(str(v)))
 
-        opacity_layout.addWidget(opacity_label)
+        opacity_layout.addWidget(self.opacity_label)
         
         opacity_control = QHBoxLayout()
         opacity_control.addWidget(self.opacity_slider)
@@ -133,6 +193,11 @@ class SettingsWindow(QWidget):
         layout.addStretch()
         self.tab_general.setLayout(layout)
 
+    def _on_language_changed(self, index):
+        code = self.lang_combo.itemData(index)
+        if code != i18n.language_code:
+            i18n.load_language(code)
+
     def _init_hotkeys_tab(self):
         layout = QFormLayout()
         
@@ -140,14 +205,22 @@ class SettingsWindow(QWidget):
         hk_capture_val = self.settings.value("hk_capture", "Print")
         hk_full_val = self.settings.value("hk_full", "Ctrl+Print")
         hk_copy_val = self.settings.value("hk_copy", "Ctrl+C")
+        hk_datetime_val = self.settings.value("hk_datetime", "Alt+D")
         
         self.hk_capture = QKeySequenceEdit(hk_capture_val)
         self.hk_full = QKeySequenceEdit(hk_full_val)
         self.hk_copy = QKeySequenceEdit(hk_copy_val)
+        self.hk_datetime = QKeySequenceEdit(hk_datetime_val)
         
-        layout.addRow("Captura de zona (Global):", self.hk_capture)
-        layout.addRow("Captura completa (Global):", self.hk_full)
-        layout.addRow("Copiar al portapapeles (En captura):", self.hk_copy)
+        self.hk_capture_label = QLabel(i18n.tr("lbl_zone_hotkey"))
+        self.hk_full_label = QLabel(i18n.tr("lbl_full_hotkey"))
+        self.hk_copy_label = QLabel(i18n.tr("lbl_copy_hotkey"))
+        self.hk_datetime_label = QLabel(i18n.tr("lbl_datetime_hotkey"))
+
+        layout.addRow(self.hk_capture_label, self.hk_capture)
+        layout.addRow(self.hk_full_label, self.hk_full)
+        layout.addRow(self.hk_copy_label, self.hk_copy)
+        layout.addRow(self.hk_datetime_label, self.hk_datetime)
         
         self.tab_hotkeys.setLayout(layout)
 
@@ -163,8 +236,11 @@ class SettingsWindow(QWidget):
         
         self.filename_pattern = QLineEdit(current_pattern)
         
-        layout.addRow("Formato de imagen:", self.fmt_combo)
-        layout.addRow("Patrón de nombre de archivo:", self.filename_pattern)
+        self.fmt_label = QLabel("Formato de imagen:")
+        self.pattern_label = QLabel("Patrón de nombre de archivo:")
+        
+        layout.addRow(self.fmt_label, self.fmt_combo)
+        layout.addRow(self.pattern_label, self.filename_pattern)
         
         self.tab_format.setLayout(layout)
 

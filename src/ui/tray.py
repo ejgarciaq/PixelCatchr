@@ -3,6 +3,7 @@ from PyQt6.QtGui import QIcon, QAction, QPixmap
 from PyQt6.QtCore import pyqtSignal, Qt, pyqtSlot
 from src.ui.settings import SettingsWindow
 from src.utils import resource_path
+from src.core.i18n import i18n
 import qtawesome as qta
 
 class SystemTrayIcon(QSystemTrayIcon):
@@ -24,43 +25,61 @@ class SystemTrayIcon(QSystemTrayIcon):
         # Initialize settings window reference
         self.settings_window = None
 
-        menu = QMenu() 
         
-        # Action: Capturar (Zona)
-        capture_action = QAction(qta.icon('fa5s.crop'), "Capturar Zona", self)
-        capture_action.triggered.connect(self.capture_triggered.emit)
-        menu.addAction(capture_action)
+        # Initialize settings window reference
+        self.settings_window = None
 
-        # Action: Captura Completa
-        full_capture_action = QAction(qta.icon('fa5s.desktop'), "Captura Completa", self)
-        full_capture_action.triggered.connect(self.full_capture_triggered.emit)
-        menu.addAction(full_capture_action)
+        self.menu = QMenu()
+        self.setup_menu()
         
-        menu.addSeparator()
-
-        # Action: Configuración
-        settings_action = QAction(qta.icon('fa5s.cog'), "Configuración", self)
-        settings_action.triggered.connect(self.show_settings)
-        menu.addAction(settings_action)
-
-        # Action: Acerca de
-        about_action = QAction(qta.icon('fa5s.info-circle'), "Acerca de", self)
-        about_action.triggered.connect(self.show_about)
-        menu.addAction(about_action)
-        
-        menu.addSeparator()
-        
-        # Action: Salir
-        exit_action = QAction(qta.icon('fa5s.power-off'), "Salir", self)
-        exit_action.triggered.connect(self.app_instance.quit)
-        menu.addAction(exit_action)
-        
-        
-        self.setContextMenu(menu)
+        self.setContextMenu(self.menu)
         
         # Connect activation signal for double-click
         self.activated.connect(self.on_tray_activated)
 
+        # Listen for language changes
+        i18n.language_changed.connect(self.retranslateUi)
+
+    def setup_menu(self):
+        self.menu.clear()
+        
+        # Action: Capturar (Zona)
+        self.capture_action = QAction(qta.icon('fa5s.crop'), i18n.tr("tray_capture_zone"), self)
+        self.capture_action.triggered.connect(self.capture_triggered.emit)
+        self.menu.addAction(self.capture_action)
+
+        # Action: Captura Completa
+        self.full_capture_action = QAction(qta.icon('fa5s.desktop'), i18n.tr("tray_capture_full"), self)
+        self.full_capture_action.triggered.connect(self.full_capture_triggered.emit)
+        self.menu.addAction(self.full_capture_action)
+        
+        self.menu.addSeparator()
+
+        # Action: Configuración
+        self.settings_action = QAction(qta.icon('fa5s.cog'), i18n.tr("tray_settings"), self)
+        self.settings_action.triggered.connect(self.show_settings)
+        self.menu.addAction(self.settings_action)
+
+        # Action: Acerca de
+        self.about_action = QAction(qta.icon('fa5s.info-circle'), i18n.tr("tray_about"), self)
+        self.about_action.triggered.connect(self.show_about)
+        self.menu.addAction(self.about_action)
+        
+        self.menu.addSeparator()
+        
+        # Action: Salir
+        self.exit_action = QAction(qta.icon('fa5s.power-off'), i18n.tr("tray_exit"), self)
+        self.exit_action.triggered.connect(self.app_instance.quit)
+        self.menu.addAction(self.exit_action)
+
+    def retranslateUi(self):
+        self.capture_action.setText(i18n.tr("tray_capture_zone"))
+        self.full_capture_action.setText(i18n.tr("tray_capture_full"))
+        self.settings_action.setText(i18n.tr("tray_settings"))
+        self.about_action.setText(i18n.tr("tray_about"))
+        self.exit_action.setText(i18n.tr("tray_exit"))
+
+    @pyqtSlot(QSystemTrayIcon.ActivationReason)
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.capture_triggered.emit()
@@ -77,11 +96,11 @@ class SystemTrayIcon(QSystemTrayIcon):
         from datetime import datetime
         year = datetime.now().year
         msg = QMessageBox()
-        msg.setWindowTitle("Acerca de PixelCatchr")
+        msg.setWindowTitle(i18n.tr("about_title"))
         msg.setText("<h3>PixelCatchr v1.0</h3>"
-                    f"<p>&copy; 2025 - {year} Webtechcrafter. Todos los derechos reservados.</p>"
-                    "<p>Desarrollado por Edson J. García Quirós</p>"
-                    '<p><a href="https://www.webtechcrafter.com">Visita nuestra página oficial</a></p>')
+                    f"<p>&copy; 2025 - {year} Webtechcrafter. {i18n.tr('about_reserved')}</p>"
+                    f"<p>{i18n.tr('about_dev')}</p>"
+                    f'<p><a href="https://www.webtechcrafter.com">{i18n.tr("about_visit")}</a></p>')
         msg.setIconPixmap(QPixmap(resource_path("assets/icon.png")).scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))  # tu icono a la izquierda
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()

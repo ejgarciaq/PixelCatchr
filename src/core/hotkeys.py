@@ -6,6 +6,7 @@ class GlobalHotkeyListener:
         self.listener = None
         self.on_zone_capture = None 
         self.on_full_capture = None
+        self.on_datetime_toggle = None
         self.settings = QSettings("Webtechcrafter", "PixelCatchr")
 
     def _map_qt_to_pynput(self, qt_str):
@@ -49,12 +50,14 @@ class GlobalHotkeyListener:
         # Note: We must match the defaults used in settings.py
         hk_capture_str = self.settings.value("hk_capture", "Print")
         hk_full_str = self.settings.value("hk_full", "Ctrl+Print")
+        hk_datetime_str = self.settings.value("hk_datetime", "Alt+D")
         
         # 2. Map to pynput format
         pynput_capture = self._map_qt_to_pynput(hk_capture_str)
         pynput_full = self._map_qt_to_pynput(hk_full_str)
+        pynput_datetime = self._map_qt_to_pynput(hk_datetime_str)
         
-        print(f"Buscando atajos: Zona='{pynput_capture}', Completa='{pynput_full}'")
+        print(f"Buscando atajos: Zona='{pynput_capture}', Completa='{pynput_full}', Fecha='{pynput_datetime}'")
 
         # 3. Build the mapping dict
         hotkey_map = {}
@@ -64,6 +67,9 @@ class GlobalHotkeyListener:
             
         if pynput_full and self.on_full_capture:
             hotkey_map[pynput_full] = self.on_full_capture
+
+        if pynput_datetime and self.on_datetime_toggle:
+            hotkey_map[pynput_datetime] = self.on_datetime_toggle
             
         if not hotkey_map:
             print("No se pudieron configurar atajos globales.")
