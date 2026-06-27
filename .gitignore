@@ -13,7 +13,6 @@ venv/
 build/
 dist/
 *.spec
-*.exe
 *.dll
 *.pyd
 *.egg-info/
