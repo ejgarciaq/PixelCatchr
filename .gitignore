@@ -11,11 +11,10 @@ venv/
 
 # PyInstaller / build artifacts
 build/
-dist/
-# Keep `dist/` ignored but allow `dist/Output/` (release artifacts) to be tracked
+# Ignore everything inside dist/ except dist/Output/
+dist/*
 !dist/Output/
 !dist/Output/**
-!*.exe
 *.spec
 *.dll
 *.pyd
