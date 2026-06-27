@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env
+.env.*
+.python-version
+
+# PyInstaller / build artifacts
+build/
+dist/
+*.spec
+# *.exe
+*.dll
+*.pyd
+*.egg-info/
+*.manifest
+*.log
+*.cache
+
+# PyInstaller temp folders
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Installer files / logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Generated docs and archives
+*.tar.gz
+*.zip
+*.egg
+
+# PyCharm
+*.iml
+
+# Local project files
+#assets/icon.ico
+#assets/icon.png
+
+# Ignore build outputs produced by this repo
+build/
+#dist/
+
+# Ignore portable executable if generated
+*.exe

@@ -48,7 +48,7 @@ class GlobalHotkeyListener:
     def start(self):
         # 1. Read hotkeys from settings (or defaults)
         # Note: We must match the defaults used in settings.py
-        hk_capture_str = self.settings.value("hk_capture", "Print")
+        hk_capture_str = self.settings.value("hk_capture", "Alt+X")
         hk_full_str = self.settings.value("hk_full", "Ctrl+Print")
         hk_datetime_str = self.settings.value("hk_datetime", "Alt+D")
         
