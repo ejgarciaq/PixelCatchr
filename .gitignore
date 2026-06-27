@@ -10,7 +10,7 @@ venv/
 .python-version
 
 # PyInstaller / build artifacts
-build/
+
 dist/
 *.spec
 *.dll
