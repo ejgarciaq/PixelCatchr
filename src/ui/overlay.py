@@ -26,6 +26,7 @@ from PyQt6.QtCore import (
     QSize,
     QDateTime,
     QSettings,
+    QStandardPaths,
 )
 from PyQt6.QtGui import QPainter, QColor, QPen, QImage, QPainterPath, QPolygonF, QCursor, QPixmap
 
@@ -844,6 +845,12 @@ class SnippingOverlay(QWidget):
         painter.end()
         return img.toImage()
 
+    def _get_default_save_folder(self):
+        path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
+        if not path:
+            path = os.path.expanduser("~")
+        return path
+
     def save_capture(self):
         img = self._get_capture_image()
         
@@ -860,9 +867,15 @@ class SnippingOverlay(QWidget):
             default_name = QDateTime.currentDateTime().toPyDateTime().strftime("%Y-%m-%d_%H-%M-%S")
         if not default_name.lower().endswith(f".{fmt}"):
             default_name += f".{fmt}"
+
+        save_dir = self.settings.value("save_folder", self._get_default_save_folder(), type=str)
+        if not save_dir:
+            save_dir = self._get_default_save_folder()
+        os.makedirs(save_dir, exist_ok=True)
+        default_path = os.path.join(save_dir, default_name)
             
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar Captura", default_name, f"Images (*.{fmt})"
+            self, "Guardar Captura", default_path, f"Images (*.{fmt})"
         )
         if file_path:
             img.save(file_path)

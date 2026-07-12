@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, 
     QCheckBox, QComboBox, QFormLayout, QLineEdit, 
-    QPushButton, QKeySequenceEdit, QSlider
+    QPushButton, QKeySequenceEdit, QSlider, QFileDialog
 )
-from PyQt6.QtCore import Qt, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QSettings, pyqtSignal, QStandardPaths
 from PyQt6.QtGui import QIcon
 from src.utils import resource_path
 from src.core.i18n import i18n
@@ -78,6 +78,8 @@ class SettingsWindow(QWidget):
         self.cb_datetime.setText(i18n.tr("chk_datetime"))
         self.cb_coords.setText(i18n.tr("chk_coords"))
         self.lang_label.setText(i18n.tr("lang_label"))
+        self.save_folder_label.setText(i18n.tr("lbl_save_folder"))
+        self.save_folder_browse.setText(i18n.tr("btn_browse"))
         
         self.opacity_label.setText(i18n.tr("lbl_opacity"))
         
@@ -103,6 +105,7 @@ class SettingsWindow(QWidget):
         self.settings.setValue("start_with_system", self.cb_startup.isChecked())
         self.settings.setValue("show_notification", self.cb_notify.isChecked())
         self.settings.setValue("overlay_opacity", self.opacity_slider.value())
+        self.settings.setValue("save_folder", self.save_folder_edit.text().strip() or self._get_default_save_folder())
         
         # Update system startup registry
         self._update_system_startup(self.cb_startup.isChecked())
@@ -167,6 +170,18 @@ class SettingsWindow(QWidget):
         self.cb_coords = QCheckBox("Mostrar coordenadas del cursor (eje X, Y) en la interfaz")
         self.cb_coords.setChecked(show_coords)
 
+        self.save_folder_label = QLabel(i18n.tr("lbl_save_folder"))
+        self.save_folder_edit = QLineEdit(self.settings.value("save_folder", self._get_default_save_folder(), type=str))
+        self.save_folder_browse = QPushButton(i18n.tr("btn_browse"))
+        self.save_folder_browse.clicked.connect(self._browse_save_folder)
+
+        save_folder_layout = QHBoxLayout()
+        save_folder_layout.addWidget(self.save_folder_edit)
+        save_folder_layout.addWidget(self.save_folder_browse)
+
+        layout.addWidget(self.save_folder_label)
+        layout.addLayout(save_folder_layout)
+
         # Opacity slider
         opacity_layout = QVBoxLayout()
         self.opacity_label = QLabel("Opacidad del fondo (oscurecimiento):")
@@ -192,6 +207,18 @@ class SettingsWindow(QWidget):
         layout.addLayout(opacity_layout)
         layout.addStretch()
         self.tab_general.setLayout(layout)
+
+    def _get_default_save_folder(self):
+        path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
+        if not path:
+            path = os.path.expanduser("~")
+        return path
+
+    def _browse_save_folder(self):
+        current_path = self.save_folder_edit.text().strip() or self._get_default_save_folder()
+        folder = QFileDialog.getExistingDirectory(self, i18n.tr("dlg_select_folder"), current_path)
+        if folder:
+            self.save_folder_edit.setText(folder)
 
     def _on_language_changed(self, index):
         code = self.lang_combo.itemData(index)
